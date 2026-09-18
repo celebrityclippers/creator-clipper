@@ -59,7 +59,7 @@ class YouTubePublisher:
                 print(f"[*] Uploading progress: {int(status.progress() * 100)}%")
 
         video_id = response.get("id")
-        print(f"[++] Success! Video uploaded successfully. Watch at: https://youtu.{video_id}")
+        print(f"[++] Success! Video uploaded successfully. Watch at: https://youtu.be{video_id}")
         return video_id
 
 
@@ -107,8 +107,12 @@ class AutopilotClipperPipeline:
                     chosen = random.choice(valid_videos)
                     
                     video_url = chosen['url']
+                    # FIXED URL PARSING METHOD BLOCK: Prevents string smashing strings together
                     if not video_url.startswith('http'):
-                        video_url = f"https://youtube.com{video_url}"
+                        if 'youtube.com' in video_url or 'youtu.be' in video_url:
+                            video_url = f"https://{video_url}"
+                        else:
+                            video_url = f"https://youtube.com{video_url}"
                         
                     video_title = chosen.get('title', 'Viral Clip Highlight')
                     print(f"[++] Autopilot discovered active media node target: {video_url} - {video_title}")
@@ -122,10 +126,10 @@ class AutopilotClipperPipeline:
     def download_viral_segment(self, url):
         """Slices out a high-intensity mid-video chunk using precise server-side seek flags."""
         output_raw = os.path.join(self.download_dir, "raw_segment.mp4")
-        print(f"[*] Extracting video block from stream timeline...")
+        print(f"[*] Extracting video block from stream timeline for target: {url}")
         
-        start_time = "00:02:00"  # Skips intro frames directly to catch core content
-        duration = 45            # Captures a perfect clip runtime block
+        start_time = "00:01:00"  # Skips intro frames directly to catch core content
+        duration = 30            # Trimmed to 30s to keep cloud processing fast and highly visual
 
         ydl_opts = {
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]',
@@ -197,3 +201,9 @@ if __name__ == "__main__":
         pipeline.run_autopilot()
     except Exception as e:
         print(f"[!] Autopilot structural system crash: {e}")
+
+
+
+
+
+
