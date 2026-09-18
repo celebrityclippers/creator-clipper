@@ -9,10 +9,10 @@ SCOPES = [
     'https://www.googleapis.com/auth/youtube.readonly'
 ]
 
+
 def generate_token():
     creds = None
 
-    # Check if an old token file exists and remove it if it contains bad scopes
     if os.path.exists('token.json'):
         try:
             creds = Credentials.from_authorized_user_file('token.json', SCOPES)
@@ -27,13 +27,11 @@ def generate_token():
         else:
             print("Initiating authentication flow...")
 
-            if not os.path.exists('client_secrets.json'):
+            if not os.path.exists('client_secretd.json'):
                 print("Error: 'client_secrets.json' not found in the current directory.")
                 return
 
-            # Forces the script to pull fresh scopes directly from this file
             flow = InstalledAppFlow.from_client_secrets_file('client_secrets.json', SCOPES)
-
             creds = flow.run_local_server(
                 port=8080,
                 prompt='consent',

@@ -1,0 +1,49 @@
+# .github/workflows/stage_clips.yml
+#
+# Manually triggered. Downloads one source video you specify, runs the
+# smart-edit pipeline, and uploads the results as a workflow artifact
+# for you to download and review. Does NOT publish to YouTube — there
+# is no YouTube auth or upload step in this workflow at all, by design.
+
+name: Stage Clips for Review
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_url:
+        description: "URL of a video you have the right to use"
+        required: true
+        type: string
+      hook_text:
+        description: "Hook text to overlay on the clips"
+        required: false
+        default: "Wait for it..."
+        type: string
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run smart-edit pipeline
+        run: python pipeline.py "${{ inputs.source_url }}" "${{ inputs.hook_text }}"
+
+      - name: Upload review queue as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-queue
+          path: review_queue/
+          retention-days: 7

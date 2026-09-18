@@ -1,0 +1,79 @@
+# .github/workflows/publish_approved.yml
+#
+# Manually triggered, second step. Only run this AFTER you've
+# downloaded the "review-queue" artifact from stage_clips.yml, watched
+# the clip yourself, and decided it's good to go. You must re-upload
+# the exact approved file as part of triggering this (clip_file_url),
+# and you must type CONFIRM to prove a human reviewed it.
+#
+# Requires repo secrets:
+#   YOUTUBE_TOKEN_JSON   -> contents of your token.json
+#   YOUTUBE_CLIENT_SECRET -> contents of your client_secret.json (kept for reference/refresh)
+
+name: Publish Approved Clip
+
+on:
+  workflow_dispatch:
+    inputs:
+      clip_artifact_run_id:
+        description: "Run ID of the stage_clips workflow that produced this clip"
+        required: true
+        type: string
+      clip_relative_path:
+        description: "Path inside the artifact, e.g. widescreen_0.mp4"
+        required: true
+        type: string
+      title:
+        description: "Video title"
+        required: true
+        type: string
+      description:
+        description: "Video description"
+        required: false
+        default: ""
+        type: string
+      privacy:
+        description: "private, unlisted, or public"
+        required: true
+        default: "private"
+        type: string
+      confirm:
+        description: "Type CONFIRM to prove you watched this clip before publishing"
+        required: true
+        type: string
+
+jobs:
+  publish:
+    if: ${{ inputs.confirm == 'CONFIRM' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore YouTube token
+        run: echo '${{ secrets.YOUTUBE_TOKEN_JSON }}' > token.json
+
+      - name: Download reviewed clip artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: review-queue
+          run-id: ${{ inputs.clip_artifact_run_id }}
+          path: review_queue
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish the specific approved file
+        run: |
+          python publish_clip.py \
+            "review_queue/${{ inputs.clip_relative_path }}" \
+            "${{ inputs.title }}" \
+            "${{ inputs.description }}" \
+            "${{ inputs.privacy }}" \
+            "${{ inputs.confirm }}"
