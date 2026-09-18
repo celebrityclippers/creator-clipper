@@ -1,0 +1,15 @@
+{
+  "search_targets": ["MrBeast", "IShowSpeed"],
+  "comparison_topics": [
+    {"topic": "Who is Richer?", "keywords": "net worth money house luxury million billions"},
+    {"topic": "Most Followed?", "keywords": "subscribers followers instagram stream records"},
+    {"topic": "More Influential?", "keywords": "viral trending stream views award audience crowd"},
+    {"topic": "Most Ambitious?", "keywords": "challenge record business crazy plan future project"}
+  ],
+  "individual_topics": [
+    "funniest moments",
+    "crazy challenges",
+    "viral stream clips",
+    "rage compilation"
+  ]
+}

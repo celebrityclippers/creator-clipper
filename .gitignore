@@ -1,0 +1,8 @@
+token.json
+client_secret.json
+client_secrets.json
+__pycache__/
+*.txt
+*.json
+!config.json
+!.github/
