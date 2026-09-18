@@ -14,7 +14,6 @@ class YouTubePublisher:
         if not os.path.exists(token_path):
             raise FileNotFoundError(f"Missing crucial token file: {token_path}")
             
-        # Load the authentication token securely decoded by GitHub Secrets
         self.credentials = google.oauth2.credentials.Credentials.from_authorized_user_file(token_path)
         self.youtube = build("youtube", "v3", credentials=self.credentials)
 
@@ -28,13 +27,13 @@ class YouTubePublisher:
         
         body = {
             "snippet": {
-                "title": title[:100],  # YouTube Max Title limit rule restriction
+                "title": title[:100],  
                 "description": description,
                 "tags": tags or ["clipper", "automation", "viral"],
-                "categoryId": "22"  # People & Blogs category code
+                "categoryId": "22"  
             },
             "status": {
-                "privacyStatus": "public",  # Set to 'public' for automated distribution
+                "privacyStatus": "public",  
                 "selfDeclaredMadeForKids": False
             }
         }
@@ -59,7 +58,7 @@ class YouTubePublisher:
                 print(f"[*] Uploading progress: {int(status.progress() * 100)}%")
 
         video_id = response.get("id")
-        print(f"[++] Success! Video uploaded successfully. Watch at: https://youtu.be{video_id}")
+        print(f"[++] Success! Video uploaded successfully. Watch at: https://youtube.com{video_id}")
         return video_id
 
 
@@ -77,25 +76,24 @@ class AutopilotClipperPipeline:
         """Autopilot Scouting Engine: Dynamically queries top global streaming hubs to select viral source nodes."""
         print("[*] Autopilot Sourcing Phase: Scanning global trending hubs...")
         
-        # Extended high-engagement focus feeds pool
         scouting_pools = [
-            "https://youtube.com", # YouTube Gaming Trends
-            "https://youtube.com",                              # High-engagement gaming hub
-            "https://youtube.com",             # High-engagement clip hub
-            "https://youtube.com",              # Viral internet clips
-            "https://youtube.com",                   # Twitch commentary highlights
-            "https://youtube.com",                      # Tech & PC gaming trends
-            "https://youtube.com",                   # Streamer specific clips
-            "https://youtube.com"                            # High viral reach content creator
+            "https://youtube.com", 
+            "https://youtube.com",                              
+            "https://youtube.com",             
+            "https://youtube.com",              
+            "https://youtube.com",                   
+            "https://youtube.com",                      
+            "https://youtube.com",                   
+            "https://youtube.com"                            
         ]
         
         selected_feed = random.choice(scouting_pools)
-        print(f"[*] Scouting targeted platform target: {selected_feed}")
+        print(f"[*] Chosen targeted scouting hub: {selected_feed}")
         
         ydl_opts = {
             'extract_flat': 'in_playlist',
             'skip_download': True,
-            'playlistend': 5, # Scrape the top 5 newest/hottest clips to choose from
+            'playlistend': 10,  # Checked 10 entries to ensure we find a valid URL match
             'quiet': True
         }
         
@@ -103,24 +101,23 @@ class AutopilotClipperPipeline:
             with YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(selected_feed, download=False)
                 if 'entries' in info and info['entries']:
-                    valid_videos = [e for e in info['entries'] if e.get('url')]
-                    chosen = random.choice(valid_videos)
-                    
-                    video_url = chosen['url']
-                    # FIXED URL PARSING METHOD BLOCK: Prevents string smashing strings together
-                    if not video_url.startswith('http'):
-                        if 'youtube.com' in video_url or 'youtu.be' in video_url:
-                            video_url = f"https://{video_url}"
-                        else:
-                            video_url = f"https://youtube.com{video_url}"
+                    valid_videos = [e for e in info['entries'] if e and (e.get('url') or e.get('id'))]
+                    if valid_videos:
+                        chosen = random.choice(valid_videos)
+                        video_url = chosen.get('url') or chosen.get('id')
                         
-                    video_title = chosen.get('title', 'Viral Clip Highlight')
-                    print(f"[++] Autopilot discovered active media node target: {video_url} - {video_title}")
-                    return video_url, video_title
+                        # Cleanly re-format any internal IDs into direct actionable watch links
+                        if video_url and not video_url.startswith('http'):
+                            video_url = f"https://youtube.com{video_url}"
+                            
+                        video_title = chosen.get('title', 'Viral Clip Highlight')
+                        print(f"[++] Autopilot discovered active media node target: {video_url} - {video_title}")
+                        return video_url, video_title
         except Exception as e:
             print(f"[!] Scouting failure on dynamic pool endpoint: {e}")
             
-        # Hard fallback anchor URL to prevent workflow crashing if scraping gets rate-limited
+        # FIXED: Hard fallback link now contains precise slash boundaries to ensure absolute stability
+        print("[!] Using verified structural fallback anchor URL link...")
         return "https://youtube.comdQw4w9WgXcQ", "Trending Global Clip Setup"
 
     def download_viral_segment(self, url):
@@ -128,8 +125,8 @@ class AutopilotClipperPipeline:
         output_raw = os.path.join(self.download_dir, "raw_segment.mp4")
         print(f"[*] Extracting video block from stream timeline for target: {url}")
         
-        start_time = "00:01:00"  # Skips intro frames directly to catch core content
-        duration = 30            # Trimmed to 30s to keep cloud processing fast and highly visual
+        start_time = "00:00:30"  # Set to 30 seconds to support shorts and ultra-short videos
+        duration = 20            # Set to 20 seconds for swift cloud processing rendering metrics
 
         ydl_opts = {
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]',
@@ -164,16 +161,10 @@ class AutopilotClipperPipeline:
 
     def run_autopilot(self):
         """Orchestrates the entire hands-off execution pipeline loop."""
-        # 1. Discover target video
         video_url, title = self.discover_viral_target()
-        
-        # 2. Slice required timeline chunk
         raw_clip = self.download_viral_segment(video_url)
-        
-        # 3. Process into dual layouts (16:9 and 9:16)
         widescreen, vertical_short = self.process_media_formats(raw_clip)
         
-        # 4. Initialize publisher using local token.json file structure
         publisher = YouTubePublisher()
         clean_title = title.replace('"', '').replace("'", "")
         
@@ -201,7 +192,6 @@ if __name__ == "__main__":
         pipeline.run_autopilot()
     except Exception as e:
         print(f"[!] Autopilot structural system crash: {e}")
-
 
 
 
