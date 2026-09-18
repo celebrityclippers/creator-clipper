@@ -1,199 +1,292 @@
+
+"""
+smart_editor.py
+================
+Transformative video editor for a clip pipeline.
+
+Pipeline: source video -> highlight detection -> auto-transcribe ->
+burned-in captions -> hook text overlay -> vertical + widescreen renders.
+
+IMPORTANT — sourcing responsibility:
+This module does NOT auto-scout or auto-select whose content to pull.
+You must supply a source URL/file yourself, and you are responsible for
+making sure you have the right to use it (your own recordings, licensed
+clips, Creative Commons content, or explicit permission from the
+creator). Editing a video does not, by itself, make it legal to use —
+it just makes it transformative rather than a straight repost.
+
+Requires:
+    pip install yt-dlp faster-whisper numpy
+    ffmpeg + ffprobe available on PATH
+"""
+
 import os
-import random
+import json
 import subprocess
-from yt_dlp import YoutubeDL
-import google.oauth2.credentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
-
-# ==========================================
-# 1. YOUTUBE API PUBLISHER ENGINE
-# ==========================================
-class YouTubePublisher:
-    def __init__(self, token_path="token.json"):
-        if not os.path.exists(token_path):
-            raise FileNotFoundError(f"Missing crucial token file: {token_path}")
-            
-        self.credentials = google.oauth2.credentials.Credentials.from_authorized_user_file(token_path)
-        self.youtube = build("youtube", "v3", credentials=self.credentials)
-
-    def upload_video(self, file_path, title, description, tags=None, is_short=False):
-        """Uploads video files to YouTube using a structured chunked protocol."""
-        if not os.path.exists(file_path):
-            print(f"[!] Target file not found: {file_path}")
-            return None
-
-        print(f"[*] Initiating YouTube upload for: {file_path}")
-        
-        body = {
-            "snippet": {
-                "title": title[:100],  
-                "description": description,
-                "tags": tags or ["clipper", "automation", "viral"],
-                "categoryId": "22"  
-            },
-            "status": {
-                "privacyStatus": "public",  
-                "selfDeclaredMadeForKids": False
-            }
-        }
-
-        media = MediaFileUpload(
-            file_path, 
-            mimetype="video/mp4", 
-            chunksize=1024*1024, 
-            resumable=True
-        )
-        
-        request = self.youtube.videos().insert(
-            part="snippet,status",
-            body=body,
-            media_body=media
-        )
-
-        response = None
-        while response is None:
-            status, response = request.next_chunk()
-            if status:
-                print(f"[*] Uploading progress: {int(status.progress() * 100)}%")
-
-        video_id = response.get("id")
-        print(f"[++] Success! Video uploaded successfully. Watch at: https://youtube.com{video_id}")
-        return video_id
+import numpy as np
+from dataclasses import dataclass
+from typing import List, Tuple, Optional
 
 
 # ==========================================
-# 2. DYNAMIC SCOUTING & MEDIA PROCESSING PIPELINE
+# 1. DOWNLOAD (explicit URL only — no auto-scouting)
 # ==========================================
-class AutopilotClipperPipeline:
-    def __init__(self, download_dir="downloads", output_dir="output"):
-        self.download_dir = download_dir
-        self.output_dir = output_dir
-        os.makedirs(download_dir, exist_ok=True)
-        os.makedirs(output_dir, exist_ok=True)
 
-    def discover_viral_target(self):
-        """Autopilot Scouting Engine: Dynamically queries top global streaming hubs to select viral source nodes."""
-        print("[*] Autopilot Sourcing Phase: Scanning global trending hubs...")
-        
-        scouting_pools = [
-            "https://youtube.com", 
-            "https://youtube.com",                              
-            "https://youtube.com",             
-            "https://youtube.com",              
-            "https://youtube.com",                   
-            "https://youtube.com",                      
-            "https://youtube.com",                   
-            "https://youtube.com"                            
-        ]
-        
-        selected_feed = random.choice(scouting_pools)
-        print(f"[*] Chosen targeted scouting hub: {selected_feed}")
-        
-        ydl_opts = {
-            'extract_flat': 'in_playlist',
-            'skip_download': True,
-            'playlistend': 10,  # Checked 10 entries to ensure we find a valid URL match
-            'quiet': True
-        }
-        
-        try:
-            with YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(selected_feed, download=False)
-                if 'entries' in info and info['entries']:
-                    valid_videos = [e for e in info['entries'] if e and (e.get('url') or e.get('id'))]
-                    if valid_videos:
-                        chosen = random.choice(valid_videos)
-                        video_url = chosen.get('url') or chosen.get('id')
-                        
-                        # Cleanly re-format any internal IDs into direct actionable watch links
-                        if video_url and not video_url.startswith('http'):
-                            video_url = f"https://youtube.com{video_url}"
-                            
-                        video_title = chosen.get('title', 'Viral Clip Highlight')
-                        print(f"[++] Autopilot discovered active media node target: {video_url} - {video_title}")
-                        return video_url, video_title
-        except Exception as e:
-            print(f"[!] Scouting failure on dynamic pool endpoint: {e}")
-            
-        # FIXED: Hard fallback link now contains precise slash boundaries to ensure absolute stability
-        print("[!] Using verified structural fallback anchor URL link...")
-        return "https://youtube.comdQw4w9WgXcQ", "Trending Global Clip Setup"
+def download_source(url: str, download_dir: str = "downloads") -> str:
+    """Downloads a full source video from an explicit URL you provide."""
+    from yt_dlp import YoutubeDL
 
-    def download_viral_segment(self, url):
-        """Slices out a high-intensity mid-video chunk using precise server-side seek flags."""
-        output_raw = os.path.join(self.download_dir, "raw_segment.mp4")
-        print(f"[*] Extracting video block from stream timeline for target: {url}")
-        
-        start_time = "00:00:30"  # Set to 30 seconds to support shorts and ultra-short videos
-        duration = 20            # Set to 20 seconds for swift cloud processing rendering metrics
+    os.makedirs(download_dir, exist_ok=True)
+    out_path = os.path.join(download_dir, "%(id)s.%(ext)s")
 
-        ydl_opts = {
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]',
-            'outtmpl': output_raw,
-            'external_downloader': 'ffmpeg',
-            'external_downloader_args': {
-                'ffmpeg_args': ['-ss', start_time, '-t', str(duration)]
-            },
-            'quiet': True,
-            'noplaylist': True
-        }
-        with YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-        return output_raw
+    ydl_opts = {
+        "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]",
+        "outtmpl": out_path,
+        "quiet": True,
+        "noplaylist": True,
+    }
+    with YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        return ydl.prepare_filename(info)
 
-    def process_media_formats(self, input_path):
-        """Transforms the source segment into a 16:9 widescreen format and a 9:16 vertical grid short."""
-        widescreen_path = os.path.join(self.output_dir, "widescreen_16_9.mp4")
-        short_path = os.path.join(self.output_dir, "vertical_9_16.mp4")
-        
-        print("[*] Processing Output Phase 1: Rendering native widescreen clip...")
-        subprocess.run(['ffmpeg', '-y', '-i', input_path, '-c', 'copy', widescreen_path], check=True)
 
-        print("[*] Processing Output Phase 2: Center-cropping focal metrics for 9:16 Short...")
-        subprocess.run([
-            'ffmpeg', '-y', '-i', input_path,
-            '-vf', 'crop=ih*(9/16):ih,scale=1080:1920',
-            '-c:v', 'libx264', '-crf', '23', '-c:a', 'aac', short_path
-        ], check=True)
+# ==========================================
+# 2. HIGHLIGHT DETECTION (audio-energy based)
+# ==========================================
 
-        return widescreen_path, short_path
+@dataclass
+class Highlight:
+    start: float
+    end: float
+    score: float
 
-    def run_autopilot(self):
-        """Orchestrates the entire hands-off execution pipeline loop."""
-        video_url, title = self.discover_viral_target()
-        raw_clip = self.download_viral_segment(video_url)
-        widescreen, vertical_short = self.process_media_formats(raw_clip)
-        
-        publisher = YouTubePublisher()
-        clean_title = title.replace('"', '').replace("'", "")
-        
-        print("[*] Dispatching widescreen video to channel pipeline...")
-        publisher.upload_video(
-            file_path=widescreen,
-            title=f"{clean_title} (Trending Moments)",
-            description=f"Automated viral trending highlights compile. Sourced dynamically from: {video_url}",
-            tags=["trending", "viral", "autopilot", "gaming"]
+
+def _get_audio_levels(input_path: str, window_sec: float = 1.0) -> List[float]:
+    """Uses ffmpeg's astats filter to get per-window RMS loudness."""
+    cmd = [
+        "ffmpeg", "-i", input_path,
+        "-af", f"astats=metadata=1:reset={window_sec}",
+        "-f", "null", "-"
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    levels = []
+    for line in result.stderr.splitlines():
+        if "RMS_level" in line and "Overall" not in line:
+            try:
+                val = float(line.split("=")[-1].strip())
+                levels.append(val)
+            except ValueError:
+                continue
+    return levels
+
+
+def detect_highlights(
+    input_path: str,
+    clip_length: float = 25.0,
+    top_n: int = 3,
+    window_sec: float = 1.0,
+) -> List[Highlight]:
+    """
+    Scores each window of the video by audio energy (loud reactions,
+    hype, yelling tend to spike RMS loudness) and returns the top_n
+    non-overlapping windows expanded to clip_length seconds each.
+    """
+    levels = _get_audio_levels(input_path, window_sec)
+    if not levels:
+        # Fallback: no usable audio stats, just take the start
+        return [Highlight(0.0, clip_length, 0.0)]
+
+    levels = np.array(levels)
+    # RMS_level from astats is negative dB; louder = closer to 0
+    scores = levels  # higher (less negative) = louder = more "hype"
+
+    duration = len(levels) * window_sec
+    half = clip_length / 2
+
+    candidates = []
+    for i, score in enumerate(scores):
+        center = i * window_sec
+        start = max(0, center - half)
+        end = min(duration, center + half)
+        candidates.append(Highlight(start, end, float(score)))
+
+    candidates.sort(key=lambda h: h.score, reverse=True)
+
+    selected: List[Highlight] = []
+    for cand in candidates:
+        if all(cand.end <= s.start or cand.start >= s.end for s in selected):
+            selected.append(cand)
+        if len(selected) >= top_n:
+            break
+
+    selected.sort(key=lambda h: h.start)
+    return selected
+
+
+def cut_clip(input_path: str, highlight: Highlight, output_path: str) -> str:
+    duration = highlight.end - highlight.start
+    cmd = [
+        "ffmpeg", "-y",
+        "-ss", str(highlight.start),
+        "-i", input_path,
+        "-t", str(duration),
+        "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
+        "-c:a", "aac",
+        output_path,
+    ]
+    subprocess.run(cmd, check=True, capture_output=True)
+    return output_path
+
+
+# ==========================================
+# 3. AUTO-TRANSCRIPTION (Whisper)
+# ==========================================
+
+def transcribe(input_path: str, model_size: str = "small") -> List[dict]:
+    """
+    Returns a list of {start, end, text} segments.
+    Uses faster-whisper for speed; falls back to skipping captions
+    if the library isn't installed.
+    """
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError:
+        print("[!] faster-whisper not installed — skipping captions. "
+              "Run: pip install faster-whisper")
+        return []
+
+    model = WhisperModel(model_size, device="cpu", compute_type="int8")
+    segments, _ = model.transcribe(input_path, beam_size=5)
+
+    out = []
+    for seg in segments:
+        out.append({"start": seg.start, "end": seg.end, "text": seg.text.strip()})
+    return out
+
+
+def segments_to_srt(segments: List[dict], srt_path: str) -> str:
+    def fmt(t: float) -> str:
+        h = int(t // 3600)
+        m = int((t % 3600) // 60)
+        s = t % 60
+        return f"{h:02}:{m:02}:{s:06.3f}".replace(".", ",")
+
+    with open(srt_path, "w", encoding="utf-8") as f:
+        for i, seg in enumerate(segments, start=1):
+            f.write(f"{i}\n{fmt(seg['start'])} --> {fmt(seg['end'])}\n{seg['text']}\n\n")
+    return srt_path
+
+
+# ==========================================
+# 4. RENDER: burn captions + hook overlay + crop formats
+# ==========================================
+
+def render_widescreen_with_captions(
+    input_path: str, srt_path: Optional[str], output_path: str, hook_text: str = ""
+) -> str:
+    vf_parts = []
+    if hook_text:
+        safe_hook = hook_text.replace(":", r"\:").replace("'", r"\'")
+        vf_parts.append(
+            f"drawtext=text='{safe_hook}':fontsize=48:fontcolor=white:"
+            f"borderw=3:bordercolor=black:x=(w-text_w)/2:y=40"
         )
-        
-        print("[*] Dispatching vertical short video to shorts loop...")
-        publisher.upload_video(
-            file_path=vertical_short,
-            title=f"{clean_title} #shorts #viral",
-            description="Dynamic vertical frame crop loop engineered by Celebrity-Clipper bot architectures.",
-            tags=["shorts", "viral", "trending", "clips"],
-            is_short=True
+    if srt_path and os.path.exists(srt_path):
+        vf_parts.append(f"subtitles={srt_path}:force_style='FontSize=20,Outline=2'")
+
+    vf = ",".join(vf_parts) if vf_parts else None
+
+    cmd = ["ffmpeg", "-y", "-i", input_path]
+    if vf:
+        cmd += ["-vf", vf]
+    cmd += ["-c:v", "libx264", "-crf", "20", "-preset", "veryfast", "-c:a", "aac", output_path]
+    subprocess.run(cmd, check=True, capture_output=True)
+    return output_path
+
+
+def render_vertical_short(
+    input_path: str, srt_path: Optional[str], output_path: str, hook_text: str = ""
+) -> str:
+    vf_parts = ["crop=ih*(9/16):ih", "scale=1080:1920"]
+    if hook_text:
+        safe_hook = hook_text.replace(":", r"\:").replace("'", r"\'")
+        vf_parts.append(
+            f"drawtext=text='{safe_hook}':fontsize=60:fontcolor=white:"
+            f"borderw=4:bordercolor=black:x=(w-text_w)/2:y=120"
         )
+    if srt_path and os.path.exists(srt_path):
+        vf_parts.append(f"subtitles={srt_path}:force_style='FontSize=28,Outline=3'")
+
+    vf = ",".join(vf_parts)
+    cmd = [
+        "ffmpeg", "-y", "-i", input_path,
+        "-vf", vf,
+        "-c:v", "libx264", "-crf", "20", "-preset", "veryfast", "-c:a", "aac",
+        output_path,
+    ]
+    subprocess.run(cmd, check=True, capture_output=True)
+    return output_path
+
+
+# ==========================================
+# 5. ORCHESTRATION — stops at a review folder, does NOT auto-publish
+# ==========================================
+
+def run_smart_edit(
+    source_url_or_path: str,
+    hook_text: str = "You won't believe this 😱",
+    review_dir: str = "review_queue",
+    is_url: bool = True,
+) -> List[dict]:
+    """
+    Runs the full transformative edit pipeline and drops finished
+    renders into review_dir for human approval. Returns a list of
+    dicts describing each produced clip (paths + metadata) — nothing
+    here calls the YouTube upload API.
+    """
+    os.makedirs(review_dir, exist_ok=True)
+
+    source_path = download_source(source_url_or_path) if is_url else source_url_or_path
+    highlights = detect_highlights(source_path, clip_length=25.0, top_n=3)
+
+    results = []
+    for idx, h in enumerate(highlights):
+        raw_clip = os.path.join(review_dir, f"raw_{idx}.mp4")
+        cut_clip(source_path, h, raw_clip)
+
+        segments = transcribe(raw_clip)
+        srt_path = None
+        if segments:
+            srt_path = os.path.join(review_dir, f"captions_{idx}.srt")
+            segments_to_srt(segments, srt_path)
+
+        wide_out = os.path.join(review_dir, f"widescreen_{idx}.mp4")
+        vert_out = os.path.join(review_dir, f"vertical_{idx}.mp4")
+        render_widescreen_with_captions(raw_clip, srt_path, wide_out, hook_text)
+        render_vertical_short(raw_clip, srt_path, vert_out, hook_text)
+
+        results.append({
+            "index": idx,
+            "highlight_score": h.score,
+            "start": h.start,
+            "end": h.end,
+            "widescreen_path": wide_out,
+            "vertical_path": vert_out,
+            "transcript_preview": " ".join(s["text"] for s in segments[:3]),
+        })
+
+    manifest_path = os.path.join(review_dir, "manifest.json")
+    with open(manifest_path, "w") as f:
+        json.dump(results, f, indent=2)
+
+    print(f"[+] {len(results)} clip(s) ready for review in: {review_dir}")
+    print(f"[+] Manifest: {manifest_path}")
+    print("[+] Nothing was uploaded. Review the clips, then publish manually")
+    print("    or call YouTubePublisher.upload_video() on the ones you approve.")
+    return results
 
 
 if __name__ == "__main__":
-    pipeline = AutopilotClipperPipeline()
-    try:
-        pipeline.run_autopilot()
-    except Exception as e:
-        print(f"[!] Autopilot structural system crash: {e}")
-
-
-
-
-
+    # Example usage — replace with a URL you have the right to use.
+    SOURCE_URL = "PUT_YOUR_OWN_OR_LICENSED_VIDEO_URL_HERE"
+    run_smart_edit(SOURCE_URL, hook_text="Wait for it...")
