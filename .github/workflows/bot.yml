@@ -1,42 +1,39 @@
 name: Run Creator Clipper Bot
 
 on:
-  # Allows you to run the bot manually from the GitHub Actions tab anytime
-  workflow_dispatch:
-  
-  # Automatically runs the bot every day at 12:00 PM UTC
+  workflow_dispatch: # Allows you to press a button on GitHub to test run it anytime
   schedule:
-    - cron: '0 12 * * *'
+    - cron: '0 12 * * *' # Automatically runs every single day at 12:00 PM UTC
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Download your code from the repository
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 2. Set up the Python environment
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip' # Speeds up future runs
+          python-version: '3.10'
 
-      # 3. Install your bot dependencies
-      - name: Install Dependencies
+      # CRITICAL: Installs system media codecs so the cloud server can process video
+      - name: Install FFmpeg System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install Python Package Dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client
+          pip install yt-dlp google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client
 
-      # 4. SECURELY RECREATE THE TOKEN FILE FROM YOUR GITHUB SECRET
+      # Restores your secure secret token into a local file cleanly
       - name: Recreate token.json
         run: |
           echo '${{ secrets.YOUTUBE_TOKEN_JSON }}' > token.json
 
-      # 5. Run your main clipper bot script
-      - name: Execute Bot Script
+      - name: Execute Video Pipeline Configuration
         run: |
-          python main.py
+          python pipeline.py
